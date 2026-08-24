@@ -1,0 +1,19 @@
+# Render Blueprint (optional).
+# Used ONLY when you deploy via Render's "New > Blueprint" flow.
+# If you use the dashboard's "New > Web Service" flow instead, this file is
+# ignored and you configure the build/start commands and env vars in the UI.
+#
+# SECURITY: no secrets are defined here on purpose. Add them in the Render
+# dashboard after the first deploy:
+#   Environment -> SHOPIFY_SHOP_DOMAIN, SHOPIFY_CLIENT_ID,
+#   SHOPIFY_CLIENT_SECRET, WEBHOOK_CALLBACK_URL, SENDGRID_API_KEY,
+#   SENDGRID_FROM (see README - Deploying to Render).
+services:
+  - type: web
+    name: sds-emailer
+    runtime: node
+    region: frankfurt # optional - change to the region nearest your store
+    plan: free # upgrade to "starter" ($7/mo) for production to avoid spin-downs
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health

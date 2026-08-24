@@ -1,0 +1,17 @@
+# Shopify CLI app configuration.
+# Docs: https://shopify.dev/docs/apps/tools/cli/configuration
+# (Required only if you use `shopify app` CLI for local development;
+#  the app itself runs fine as a standalone Node service.)
+
+name = "central-cleaning-sds-emailer"
+client_id = "REPLACE_WITH_YOUR_CLIENT_ID"
+application_url = "https://app.example.com"
+embedded = false
+
+[access_scopes]
+# read_orders: receive orders/paid webhook payloads (contains protected customer data)
+# read_products: read product metafields, product type, and collections
+scopes = "read_orders,read_products"
+
+[webhooks]
+api_version = "2026-07"
