@@ -1,10 +1,16 @@
 const DEFAULT_CATEGORIES = [
   'Chemicals',
+  'Cleaning Chemicals',
   'Odour Control',
+  'Odor Control',
   'Eco Friendly Chemicals',
   'Hand Sanitiser',
   'Hand Soap',
   'Hand Wipes',
+  'Insect Repellants',
+  'Spill Kit',
+  'Cleaners & Degreasers',
+  'Surface Disinfectants & Sanitisers',
 ];
 
 function escapeHtml(str) {
@@ -64,8 +70,8 @@ Central Cleaning Supplies`;
     .map((i) => {
       const label = `${i.productName} ${i.sku}`.replace(/\s+/g, ' ').trim();
       return (
-        `  <li><a href="${escapeHtml(i.sdsUrl)}">${escapeHtml(label)}</a>` +
-        ` &mdash; ${escapeHtml(i.sdsUrl)}</li>`
+        `  <li>${escapeHtml(label)} &mdash; ` +
+        `<a title="View SDS" href="${escapeHtml(i.sdsUrl)}" target="_blank">View SDS</a></li>`
       );
     })
     .join('\n');
@@ -91,3 +97,4 @@ ${htmlRows}
 }
 
 module.exports = { renderSdsEmail, DEFAULT_CATEGORIES };
+
