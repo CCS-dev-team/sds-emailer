@@ -1,0 +1,95 @@
+{
+  "id": "gid://shopify/Product/7976784920715",
+  "title": "Agar Taurus Laundry Detergent 5L",
+  "productType": "",
+  "tags": [
+    "Cleaning Chemicals",
+    "Washing Powders Detergents \u0026 Rinses"
+  ],
+  "collections": {
+    "edges": [
+      {
+        "node": {
+          "title": "Cleaning Chemicals"
+        }
+      },
+      {
+        "node": {
+          "title": "Washing Powders, Detergents \u0026 Rinses"
+        }
+      },
+      {
+        "node": {
+          "title": "Agar"
+        }
+      }
+    ]
+  },
+  "metafields": {
+    "edges": [
+      {
+        "node": {
+          "namespace": "custom",
+          "key": "industrie",
+          "type": "rich_text_field",
+          "value": "{\"type\":\"root\",\"children\":[{\"listType\":\"unordered\",\"type\":\"list\",\"children\":[{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Clothes\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Cottons\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Coloureds\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Whites\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Synthetics\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Blends\"}]}]}]}",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "custom",
+          "key": "material",
+          "type": "rich_text_field",
+          "value": "{\"type\":\"root\",\"children\":[{\"listType\":\"unordered\",\"type\":\"list\",\"children\":[{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Anionic surfactants\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Nonionic surfactants\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"EDTA, tetra-sodium salt\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Other non hazardous ingredients\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Water\"}]}]}]}",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "custom",
+          "key": "download_pdf_file",
+          "type": "url",
+          "value": "https://cdn.shopify.com/s/files/1/0680/4606/1707/files/TAU5.pdf?v=1775454511",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "global",
+          "key": "title_tag",
+          "type": "string",
+          "value": "Agar Taurus Laundry Detergent 5L | Central Cleaning Supplies",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "global",
+          "key": "description_tag",
+          "type": "string",
+          "value": "Agar Taurus Laundry Liquid Detergent 5L delivers powerful cleaning, removing stains and leaving fabrics fresh and bright.",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "custom",
+          "key": "features",
+          "type": "rich_text_field",
+          "value": "{\"type\":\"root\",\"children\":[{\"listType\":\"unordered\",\"type\":\"list\",\"children\":[{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Concentrated detergent\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Use in hot or cold water\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Whitens and brightens fabric\"}]},{\"type\":\"list-item\",\"children\":[{\"type\":\"text\",\"value\":\"Fresh fragrance\"}]}]}]}",
+          "reference": null
+        }
+      },
+      {
+        "node": {
+          "namespace": "custom",
+          "key": "logo_image",
+          "type": "file_reference",
+          "value": "gid://shopify/MediaImage/29098797990027",
+          "reference": {}
+        }
+      }
+    ]
+  }
+}

@@ -40,8 +40,9 @@ Customer receives "Safety Data Sheets (SDS) for your recent chemical purchase"
 
 The six categories are matched **case-insensitively** against **both**:
 
-- the product's **Product type** (`productType`), and
-- the titles of the **collections** the product belongs to
+- the product's **Product type** (`productType`),
+- the titles of the **collections** the product belongs to, and
+- the product's **tags**
 
 | Category |
 | --- |
@@ -58,6 +59,9 @@ A product qualifies only if it is in one of these categories **AND** its
 > This is deliberately flexible: as long as products are assigned to matching
 > collections or typed accordingly in your catalog, no code changes are
 > needed. You can extend or narrow the list via the `SDS_CATEGORIES` env var.
+> Matching is case-insensitive and **partial**: for example, a product tagged
+> or collected under "Cleaning Chemicals" qualifies because "Chemicals"
+> appears in the name, and "Hand Sanitiser Gel" matches "Hand Sanitiser".
 
 ## The metafield: `custom.download_pdf_file`
 
