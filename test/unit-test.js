@@ -69,6 +69,25 @@ assert.strictEqual(resolveSdsUrl({ value: 'gid://shopify/GenericFile/9', type: '
 const empty = await findSdsItems('store.myshopify.com', 'tok', { lineItems: [] });
 assert.deepStrictEqual(empty, []);
 
+// ---- 6. Idempotency store: delivery dedupe + order-level (cross-topic) guard ----
+const os = require('os');
+const path = require('path');
+const fs = require('fs');
+const { JsonStore } = require('../src/store');
+const tmpFile = path.join(os.tmpdir(), `sds-store-test-${Date.now()}.json`);
+const s = new JsonStore(tmpFile);
+assert.strictEqual(s.has('delivery-1'), false);
+s.mark('delivery-1');
+assert.strictEqual(s.has('delivery-1'), true);
+assert.strictEqual(s.orderSent('order-42'), false);
+s.markOrderSent('order-42');
+assert.strictEqual(s.orderSent('order-42'), true);
+assert.strictEqual(s.orderSent('12345'), false);
+const sReloaded = new JsonStore(tmpFile); // persists across instances
+assert.strictEqual(sReloaded.has('delivery-1'), true);
+assert.strictEqual(sReloaded.orderSent('order-42'), true);
+try { fs.unlinkSync(tmpFile); } catch {}
+
 console.log('ALL UNIT CHECKS PASSED');
 console.log('--- rendered email (text) ---');
 console.log(email.text);
