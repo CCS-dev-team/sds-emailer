@@ -6,6 +6,7 @@ const { findSdsItems } = require('./sds');
 const { initSendGrid, sendSdsEmail } = require('./email');
 const { JsonStore } = require('./store');
 const { getAdminAccessToken } = require('./auth');
+const oauth = require('./oauth');
 
 const app = express();
 app.disable('x-powered-by');
@@ -116,6 +117,66 @@ app.post(
     }
   }
 );
+
+/**
+ * ---------- OAuth install flow (authorization code grant) ----------
+ * Run ONCE, locally, to obtain a store access token for a production store
+ * that is not in the app's Dev Dashboard organization.
+ *
+ *   1. npm start        (locally)
+ *   2. open http://localhost:3000/auth/install
+ *   3. approve the app in the Shopify approval screen
+ *   4. the callback prints the access token and saves the response to
+ *      data/shopify-token.json
+ *   5. paste the token into SHOPIFY_ADMIN_ACCESS_TOKEN (.env + Render)
+ */
+app.get('/auth/install', (req, res) => {
+  if (!process.env.SHOPIFY_SHOP_DOMAIN || !process.env.SHOPIFY_CLIENT_ID) {
+    return res.status(500).send('Missing SHOPIFY_SHOP_DOMAIN / SHOPIFY_CLIENT_ID in .env');
+  }
+  const redirectUri =
+    process.env.APP_REDIRECT_URI || `http://localhost:${process.env.PORT || 3000}/auth/callback`;
+  res.redirect(
+    oauth.buildInstallUrl(process.env.SHOPIFY_SHOP_DOMAIN, process.env.SHOPIFY_CLIENT_ID, redirectUri)
+  );
+});
+
+app.get('/auth/callback', async (req, res) => {
+  try {
+    const check = oauth.verifyCallback(req.query, webhookSecret);
+    if (!check.ok) return res.status(400).send(`Callback validation failed: ${check.error}`);
+    if (!req.query.code) return res.status(400).send('Missing authorization code');
+
+    const redirectUri =
+      process.env.APP_REDIRECT_URI || `http://localhost:${process.env.PORT || 3000}/auth/callback`;
+    const data = await oauth.exchangeCode(
+      check.shop,
+      process.env.SHOPIFY_CLIENT_ID,
+      process.env.SHOPIFY_CLIENT_SECRET,
+      req.query.code,
+      redirectUri
+    );
+
+    const file = oauth.saveToken(data);
+    console.log('OAuth install complete. Access token:', data.access_token);
+    if (data.refresh_token) {
+      console.log('Refresh token present (expires in', data.refresh_token_expires_in, 's)');
+    }
+
+    res
+      .status(200)
+      .send(
+        '<h2>Installation complete</h2>' +
+          '<p>Copy the access token below into <code>SHOPIFY_ADMIN_ACCESS_TOKEN</code> ' +
+          'in <code>.env</code> and in Render\'s Environment, then restart/redeploy.</p>' +
+          `<p><code>${data.access_token}</code></p>` +
+          `<p>Token also saved to <code>${file}</code>.</p>`
+      );
+  } catch (err) {
+    console.error('OAuth callback failed:', err);
+    res.status(500).send(`OAuth callback failed: ${err.message}`);
+  }
+});
 
 app.get('/health', (req, res) => res.json({ ok: true }));
 

@@ -21,7 +21,23 @@ let cachedToken = null;
 let cachedExpiresAt = 0;
 
 async function obtainClientCredentialsToken(shop, clientId, clientSecret) {
-  const res = await fetch(`https://${shop}/admin/oauth/access_token`, {
+  const url = `https://${shop}/admin/oauth/access_token`;
+
+  // ---- TEMPORARY DIAGNOSTICS (remove once the grant works) ----
+  console.log('[auth] POST', url);
+  const id = String(clientId || '');
+  const secret = String(clientSecret || '');
+  console.log(
+    `[auth] shop="${shop}" (length ${shop.length}) | ` +
+      `contains https? ${/https?:\/\//i.test(shop)} | trailing slash? ${/\/$/.test(shop)}`
+  );
+  console.log(
+    `[auth] client_id prefix="${id.slice(0, 4)}..." (length ${id.length}) | ` +
+      `client_secret prefix="${secret.slice(0, 4)}..." (length ${secret.length})`
+  );
+  // -------------------------------------------------------------
+
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -31,12 +47,25 @@ async function obtainClientCredentialsToken(shop, clientId, clientSecret) {
     }),
   });
 
-  // The response body may not be JSON on failure — parse defensively.
-  const data = await res.json().catch(() => ({}));
+  // The response body may not be JSON on failure — parse defensively and
+  // surface the raw text; Shopify often returns an EMPTY body on 400 and
+  // puts the reason in status/headers instead.
+  const rawText = await res.text();
+  let data;
+  try {
+    data = JSON.parse(rawText);
+  } catch {
+    data = rawText ? { raw: rawText } : {};
+  }
 
   if (!res.ok || !data.access_token) {
+    console.error('[auth] GRANT FAILED — status', res.status);
+    console.error(
+      '[auth] response headers:',
+      JSON.stringify(Object.fromEntries(res.headers.entries()), null, 2)
+    );
     throw new Error(
-      `Client credentials grant failed (HTTP ${res.status}): ${JSON.stringify(data)}`
+      `Client credentials grant failed (HTTP ${res.status}): ${rawText || '(empty body)'}`
     );
   }
 

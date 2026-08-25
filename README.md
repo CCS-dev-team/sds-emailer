@@ -105,6 +105,32 @@ Both **HTML** and **plain-text** versions are sent.
   - an API key, and
   - a **verified sender** (domain or single sender) for the From address.
 
+## Installing on your store (authorization code flow)
+
+The client-credentials grant only works when the app AND the store are in the
+same Dev Dashboard organization — otherwise the token endpoint returns
+`400 Oauth error shop_not_permitted`. That applies to most **production
+stores**. The documented alternative for a standalone app is the
+**authorization code grant**: install the app once, exchange the code for a
+store access token, and paste that token into the app.
+
+1. **Dev Dashboard → your app → Versions → Create version**, and set:
+   - **App URL**: any public HTTPS URL (e.g. your Render URL)
+   - **Allowed redirect URL**: `http://localhost:3000/auth/callback` (exactly
+     as written — it must match `APP_REDIRECT_URI` in your `.env`)
+   - **Admin API scopes**: `read_orders`, `read_products`
+   - **Release** the version.
+2. Run the app locally (`npm start`) and open
+   `http://localhost:3000/auth/install` — it redirects you to Shopify's
+   approval screen.
+3. Approve/install the app on the store. Shopify redirects back to
+   `/auth/callback`; the app validates `state` + `shop` + `hmac`, exchanges
+   the code for an offline access token, prints it, and saves the response
+   to `data/shopify-token.json`.
+4. Copy the printed token into **`SHOPIFY_ADMIN_ACCESS_TOKEN`** in `.env`
+   **and** in Render's Environment. Set **`SHOPIFY_API_SECRET`** to your
+   client secret (webhook HMAC). Restart/redeploy.
+
 ## Setup
 
 1. Clone/copy this repo and install dependencies:
