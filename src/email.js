@@ -30,7 +30,7 @@ function buildSdsMessage({ to, firstName, items, from, fromName }) {
     subject,
     text,
     html,
-    mailSettings: {
+        trackingSettings: {
       clickTracking: { enable: false, enableText: false },
     },
   };
