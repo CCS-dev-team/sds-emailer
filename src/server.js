@@ -7,6 +7,8 @@ const { initSendGrid, sendSdsEmail } = require('./email');
 const { JsonStore } = require('./store');
 const { getAdminAccessToken } = require('./auth');
 const oauth = require('./oauth');
+const { checkExclusions } = require('./exclusions');
+
 
 const app = express();
 app.disable('x-powered-by');
@@ -93,6 +95,32 @@ async function handleOrderWebhook(req, res) {
       if (webhookId) store.mark(webhookId);
       return res.status(200).json({ ok: true, skipped: 'order already emailed' });
     }
+    // 2.7 Opt-out check (metafield-driven).
+    //     A flag on the B2B Company suppresses EVERY location and contact under
+    //     it (existing and future); a flag on the Customer suppresses that
+    //     buyer only. Placed BEFORE findSdsItems() so an excluded order costs
+    //     no extra product lookups. Returns HTTP 200 (never 4xx) so Shopify
+    //     does not retry the delivery.
+    const exclusion = await checkExclusions(shop, accessToken, order);
+    if (exclusion.excluded) {
+      console.log(
+        `[webhook] Skipping order ${order.id} on ${shop} — ${exclusion.scope} ` +
+          `"${exclusion.name}" (${exclusion.id}) opted out via ${exclusion.metafield}`
+      );
+      if (webhookId) store.mark(webhookId);
+      // Deliberately NOT store.markOrderSent(): the order was never emailed, so
+      // it is not recorded as emailed. Clear the metafield flag and the order
+      // can be emailed normally again.
+      return res.status(200).json({
+        ok: true,
+        emailsSent: 0,
+        reason: 'opt-out metafield',
+        scope: exclusion.scope,
+        id: exclusion.id,
+      });
+    }
+
+
 
     // 3. Map line items -> product GIDs
     const lineItems = (order.line_items || []).map((li) => ({
