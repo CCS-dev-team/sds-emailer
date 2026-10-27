@@ -44,7 +44,7 @@ function buildInstallUrl(shop, clientId, redirectUri) {
   saveState(state);
   const params = new URLSearchParams({
     client_id: clientId,
-    scope: 'read_orders,read_products',
+    scope: 'read_orders,read_products,read_companies,read_customers',
     redirect_uri: redirectUri,
     state,
   });

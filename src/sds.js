@@ -15,6 +15,10 @@ const DEFAULT_CATEGORIES = [
   'Surface Disinfectants & Sanitisers',
 ];
 
+/**
+ * Categories come from the SDS_CATEGORIES env var (comma-separated);
+ * defaults to the twelve confirmed categories for Central Cleaning Supplies.
+ */
 function getCategoryList() {
   const raw = process.env.SDS_CATEGORIES || DEFAULT_CATEGORIES.join(',');
   return raw
@@ -29,10 +33,12 @@ function normalize(s) {
 
 /**
  * A product qualifies when ANY of its Product Type, collection titles, or
- * tags matches one of the configured categories. Matching is
- * case-insensitive and uses both-way substring containment, so:
- *   "Cleaning Chemicals" matches "Chemicals"
- *   "Hand Sanitiser"     matches "Hand Sanitiser Gel"
+ * tags EXACTLY matches one of the configured categories. Matching is
+ * case-insensitive and whitespace-trimmed, but NOT substring-based:
+ *   "Cleaning Chemicals" matches "Cleaning Chemicals" only
+ *   "Hand Sanitiser Gel" does NOT match "Hand Sanitiser"
+ * (Exact matching was locked in so partial-name tags such as "Soap" or
+ * "Hand Sanitiser Gel" cannot accidentally flag a product.)
  */
 function matchesCategory(product, categoryList) {
   const haystacks = [
@@ -47,7 +53,7 @@ function matchesCategory(product, categoryList) {
 
   return categoryList.some((c) => {
     if (!c) return false;
-    return haystacks.some((h) => h === c || h.includes(c) || c.includes(h));
+    return haystacks.includes(c);
   });
 }
 
@@ -124,6 +130,8 @@ async function fetchProductInfo(shop, accessToken, productGids) {
           productType
           tags
           metafield(namespace: "custom", key: "download_pdf_file") {
+            namespace
+            key
             value
             type
             reference {

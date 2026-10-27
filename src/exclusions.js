@@ -17,9 +17,10 @@ const { shopifyGraphQL } = require('./shopify');
  * SDS documents is the compliance default; a transient API error must never
  * silently withhold them. Flip to fail-closed only if you prefer the reverse.
  *
- * INDIVIDUAL CUSTOMERS: a private (non-B2B) customer has NO company and NO
- * opt-out metafield at all. That is a "send" state, and it must never cost the
- * order a wasted B2B round trip — see companyLookupUnsupported below.
+ * SCOPES: both lookups read customer data. With only read_orders/read_products,
+ * Shopify refuses `order.purchasingEntity` and `customer(id:)` outright, so a
+ * scope probe runs once per process and the lookups are skipped cleanly with a
+ * "not evaluated" verdict instead of firing queries that always fail.
  */
 
 function getOptOutKey() {
@@ -121,6 +122,55 @@ const COMPANY_QUERY = `
     }
   }
 `;
+
+// ---------------------------------------------------------------- scope probe
+// The COMPANY lookup (order.purchasingEntity) and the CUSTOMER lookup both need
+// access to customer data: Shopify rejects them with
+//   "Access denied for purchasingEntity field. Required access: The user must
+//    have access to customers and orders or draft orders."
+// This app requests only read_orders,read_products, so both lookups are refused
+// on every order. Rather than fire two doomed queries per order and rely on
+// fail-open, read the granted scopes ONCE and skip them cleanly.
+//
+// null = unknown (probe failed) -> proceed and rely on fail-open as before.
+const SCOPES_QUERY = `
+  query SdsOptOutScopes {
+    currentAppInstallation {
+      accessScopes {
+        handle
+      }
+    }
+  }
+`;
+
+const SCOPE_TTL_MS = Number(process.env.SDS_SCOPE_CACHE_MS || 10 * 60 * 1000);
+let scopeProbe = null; // { at: number, scopes: Set<string> | null }
+
+function resetScopeCache() {
+  scopeProbe = null;
+}
+
+async function getGrantedScopes(shop, accessToken) {
+  if (scopeProbe && Date.now() - scopeProbe.at < SCOPE_TTL_MS) return scopeProbe.scopes;
+
+  try {
+    const data = await shopifyGraphQL(shop, accessToken, SCOPES_QUERY);
+    const nodes =
+      (data && data.currentAppInstallation && data.currentAppInstallation.accessScopes) || [];
+    const scopes = new Set(
+      nodes.map((n) => String((n && n.handle) || '').trim().toLowerCase()).filter(Boolean)
+    );
+    scopeProbe = { at: Date.now(), scopes };
+    return scopes;
+  } catch (err) {
+    console.warn(
+      '[exclusions] could not read granted access scopes; will attempt customer lookups and fail open:',
+      err.message
+    );
+    scopeProbe = { at: Date.now(), scopes: null };
+    return null;
+  }
+}
 
 // Small in-process cache: a company placing many orders, or one order firing
 // both orders/paid and orders/fulfilled, should not re-query every time.
@@ -244,13 +294,36 @@ async function checkCompanyOrigin(shop, accessToken, order, key) {
  * Decide whether this order should receive the SDS email.
  *
  * @returns {Promise<{excluded: boolean, scope?: string, id?: string, name?: string,
- *                    reason?: string, companyReason?: string, metafield: string}>}
+ *                    reason?: string, companyReason?: string, customerReason?: string,
+ *                    metafield: string, scopesChecked?: boolean}>}
  */
 async function checkExclusions(shop, accessToken, order) {
   const key = getOptOutKey();
   const metafield = `${key.namespace}.${key.key}`;
 
-  let companyResult = { excluded: false, reason: 'company check disabled (SDS_COMPANY_OPT_OUT=false)' };
+  // Both lookups read customer data. Without the scope Shopify refuses them, so
+  // check ONCE and skip cleanly instead of firing queries that are guaranteed to
+  // fail (and cost every order two round trips inside Shopify's ~5s budget).
+  const scopes = await getGrantedScopes(shop, accessToken);
+  const canReadCustomers = scopes === null || scopes.has('read_customers');
+
+  if (!canReadCustomers) {
+    console.warn(
+      '[exclusions] read_customers not granted: company and customer opt-out checks are ' +
+        'NOT EVALUATED, SDS emails will always send. Grant read_customers and re-authorise ' +
+        'the app to enable metafield opt-outs.'
+    );
+    return {
+      excluded: false,
+      metafield,
+      companyReason: 'not evaluated (read_customers not granted)',
+      customerReason: 'not evaluated (read_customers not granted)',
+      reason: 'not evaluated (read_customers not granted)',
+      scopesChecked: true,
+    };
+  }
+
+  let companyResult = { excluded: false, reason: 'company check disabled (SDS_COMPANY_OPT_OUT=true' };
 
   if (companyCheckEnabled()) {
     companyResult = await checkCompanyOrigin(shop, accessToken, order, key);
@@ -268,6 +341,7 @@ async function checkExclusions(shop, accessToken, order) {
     excluded: false,
     metafield,
     companyReason: companyResult.reason,
+    customerReason: customerResult.reason,
     reason: customerResult.reason || 'no opt-out metafield set',
   };
 }
@@ -283,4 +357,5 @@ module.exports = {
   getOptOutKey,
   clearExclusionCache,
   resetCompanyLookupSupport,
+  resetScopeCache,
 };
