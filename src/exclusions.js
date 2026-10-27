@@ -16,6 +16,10 @@ const { shopifyGraphQL } = require('./shopify');
  * FAIL-OPEN: any Shopify/API error logs a warning and SENDS the email. Supplying
  * SDS documents is the compliance default; a transient API error must never
  * silently withhold them. Flip to fail-closed only if you prefer the reverse.
+ *
+ * INDIVIDUAL CUSTOMERS: a private (non-B2B) customer has NO company and NO
+ * opt-out metafield at all. That is a "send" state, and it must never cost the
+ * order a wasted B2B round trip — see companyLookupUnsupported below.
  */
 
 function getOptOutKey() {
@@ -123,6 +127,16 @@ const COMPANY_QUERY = `
 const cache = new Map();
 const CACHE_TTL_MS = Number(process.env.SDS_EXCLUSION_CACHE_MS || 5 * 60 * 1000);
 
+// Learned once per process: can this store answer the B2B company question at
+// all? An individual (non-B2B) customer has NO company and NO opt-out
+// metafield, so a failing/absent company lookup must never cost every order a
+// wasted round trip inside Shopify's ~5s webhook budget. Always fail-open.
+let companyLookupUnsupported = false;
+
+function resetCompanyLookupSupport() {
+  companyLookupUnsupported = false;
+}
+
 function cacheGet(cacheKey) {
   const hit = cache.get(cacheKey);
   if (!hit) return undefined;
@@ -179,6 +193,10 @@ async function checkCompanyOrigin(shop, accessToken, order, key) {
   const orderGid = toOrderGid(order);
   if (!orderGid) return { excluded: false };
 
+  if (companyLookupUnsupported) {
+    return { excluded: false, reason: 'company lookup unsupported (not B2B) - skipped' };
+  }
+
   const cacheKey = `order-company:${orderGid}`;
   const cachedResult = cacheGet(cacheKey);
   if (cachedResult) return cachedResult;
@@ -192,7 +210,7 @@ async function checkCompanyOrigin(shop, accessToken, order, key) {
     const entity = data && data.order && data.order.purchasingEntity;
     const company = entity && entity.company;
     if (!company || !company.id) {
-      out = { excluded: false, reason: 'order has no company (non-B2B)' };
+      out = { excluded: false, reason: 'order has no company (individual customer)' };
     } else {
       const mf = findOptOutMetafield(company.metafields, key);
       out =
@@ -207,6 +225,14 @@ async function checkCompanyOrigin(shop, accessToken, order, key) {
     }
   } catch (err) {
     console.warn(`[exclusions] company lookup failed for order ${orderGid}; sending anyway:`, err.message);
+    // Latch ONLY on a permanent capability failure: the field does not exist on
+    // this store (no B2B) or is not readable at all. A transient network blip or
+    // a per-order hiccup must never disable company opt-out for the process.
+    const msg = String((err && err.message) || '');
+    if (/purchasingentity[^\n]*(doesn'?t|does not) exist|field 'purchasingentity'/i.test(msg)) {
+      companyLookupUnsupported = true;
+      console.warn('[exclusions] store cannot answer the company lookup; skipping it for later orders (fail-open)');
+    }
     out = { excluded: false, reason: 'company lookup failed (fail-open)' };
   }
 
@@ -218,21 +244,32 @@ async function checkCompanyOrigin(shop, accessToken, order, key) {
  * Decide whether this order should receive the SDS email.
  *
  * @returns {Promise<{excluded: boolean, scope?: string, id?: string, name?: string,
- *                    reason?: string, metafield: string}>}
+ *                    reason?: string, companyReason?: string, metafield: string}>}
  */
 async function checkExclusions(shop, accessToken, order) {
   const key = getOptOutKey();
   const metafield = `${key.namespace}.${key.key}`;
 
+  let companyResult = { excluded: false, reason: 'company check disabled (SDS_COMPANY_OPT_OUT=false)' };
+
   if (companyCheckEnabled()) {
-    const companyResult = await checkCompanyOrigin(shop, accessToken, order, key);
-    if (companyResult.excluded) return { ...companyResult, metafield };
+    companyResult = await checkCompanyOrigin(shop, accessToken, order, key);
+    if (companyResult.excluded) {
+      return { ...companyResult, metafield, companyReason: companyResult.reason };
+    }
   }
 
   const customerResult = await checkCustomerOrigin(shop, accessToken, order, key);
-  if (customerResult.excluded) return { ...customerResult, metafield };
+  if (customerResult.excluded) {
+    return { ...customerResult, metafield, companyReason: companyResult.reason };
+  }
 
-  return { excluded: false, metafield, reason: customerResult.reason || 'no opt-out metafield set' };
+  return {
+    excluded: false,
+    metafield,
+    companyReason: companyResult.reason,
+    reason: customerResult.reason || 'no opt-out metafield set',
+  };
 }
 
 function clearExclusionCache() {
@@ -245,4 +282,5 @@ module.exports = {
   findOptOutMetafield,
   getOptOutKey,
   clearExclusionCache,
+  resetCompanyLookupSupport,
 };
