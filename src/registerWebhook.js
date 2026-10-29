@@ -20,10 +20,31 @@ require('dotenv').config();
 const { getAdminAccessToken } = require('./auth');
 
 const shop = process.env.SHOPIFY_SHOP_DOMAIN;
-const callbackUrl = process.env.WEBHOOK_CALLBACK_URL;
 const version = process.env.SHOPIFY_API_VERSION || '2026-07';
 
-const TOPICS = ['ORDERS_PAID', 'ORDERS_FULFILLED'];
+/**
+ * Each topic is delivered to its OWN path on the same origin. The handler keys
+ * off the X-Shopify-Topic header, so a shared URL still works, but matching
+ * paths keep Shopify's UI and the Render logs readable - and previously a single
+ * ORDERS_FULFILLED subscription was created pointing at /webhooks/orders/paid.
+ *
+ * Only the ORIGIN of WEBHOOK_CALLBACK_URL is used, so an existing
+ * .../webhooks/orders/paid value keeps working unchanged.
+ */
+const TOPIC_PATHS = {
+  ORDERS_PAID: '/webhooks/orders/paid',
+  ORDERS_FULFILLED: '/webhooks/orders/fulfilled',
+};
+
+const TOPICS = Object.keys(TOPIC_PATHS);
+
+/** Build the per-topic callback URL from the origin of WEBHOOK_CALLBACK_URL. */
+function callbackUrlFor(topic) {
+  const base = process.env.WEBHOOK_CALLBACK_URL;
+  if (!base) throw new Error('WEBHOOK_CALLBACK_URL is missing from .env');
+  const origin = new URL(base).origin;
+  return `${origin}${TOPIC_PATHS[topic]}`;
+}
 
 const query = `
   mutation WebhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
@@ -49,6 +70,7 @@ const query = `
 `;
 
 async function registerOne(adminToken, topic) {
+  const callbackUrl = callbackUrlFor(topic);
   const res = await fetch(`https://${shop}/admin/api/${version}/graphql.json`, {
     method: 'POST',
     headers: {
@@ -76,17 +98,24 @@ async function registerOne(adminToken, topic) {
 }
 
 (async () => {
-  if (!shop || !callbackUrl) {
+  const base = process.env.WEBHOOK_CALLBACK_URL;
+
+  if (!shop || !base) {
     console.error('Missing SHOPIFY_SHOP_DOMAIN or WEBHOOK_CALLBACK_URL in .env');
     process.exitCode = 1;
     return;
   }
 
-  if (!/^https:\/\//i.test(callbackUrl)) {
+  if (!/^https:\/\//i.test(base)) {
     console.error('WEBHOOK_CALLBACK_URL must be an HTTPS URL.');
     process.exitCode = 1;
     return;
   }
+
+  console.log(`Shop:   ${shop}`);
+  console.log(`Auth:   ${process.env.SHOPIFY_ADMIN_ACCESS_TOKEN ? 'explicit SHOPIFY_ADMIN_ACCESS_TOKEN' : 'client-credentials grant'}`);
+  for (const t of TOPICS) console.log(`Target: ${t} -> ${callbackUrlFor(t)}`);
+  console.log('');
 
   try {
     // OAuth access token (production store) or client-credentials grant —
