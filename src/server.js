@@ -9,7 +9,6 @@ const { getAdminAccessToken } = require('./auth');
 const oauth = require('./oauth');
 const { checkExclusions } = require('./exclusions');
 
-
 const app = express();
 app.disable('x-powered-by');
 
@@ -31,24 +30,54 @@ if (!webhookSecret) {
   fail('set SHOPIFY_CLIENT_SECRET (Dev Dashboard app) or SHOPIFY_API_SECRET (legacy) for webhook HMAC verification');
 }
 if (!process.env.SHOPIFY_ADMIN_ACCESS_TOKEN && !(process.env.SHOPIFY_CLIENT_ID && process.env.SHOPIFY_CLIENT_SECRET)) {
-  fail('set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET (Dev Dashboard app) so the access token can be requested via the client credentials grant');
+  fail('set SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET ( Dev Dashboard app) so the access token can be requested via the client credentials grant');
 }
 if (!process.env.SENDGRID_API_KEY) fail('SENDGRID_API_KEY is not set');
 if (!process.env.SENDGRID_FROM) fail('SENDGRID_FROM is not set');
 
 /**
- * Topics that trigger the SDS email:
- *  - orders/paid      fires when payment is captured (paid-upfront orders)
- *  - orders/fulfilled fires when the order is fulfilled / goods dispatched.
+ * Topics we ACCEPT on the wire.
  *
- * The fulfilled topic is essential for Net-term orders: orders/paid does NOT
- * fire until the customer actually settles the invoice (could be 30+ days
- * later, or never inside Shopify). Fulfilment happens at dispatch — the
- * moment the customer starts storing/handling the chemicals and needs the
- * SDS. The order-level idempotency guard below ensures only ONE email per
- * order even when both topics fire.
+ * Both subscriptions stay registered on the store:
+ *  - orders/paid      fires when payment is captured
+ *  - orders/fulfilled fires when the order is fulfilled (goods dispatched)
+ *
+ * Keeping both subscribed means a delivery for either topic always gets a
+ * valid HMAC-verified 200 here (never a 4xx), so Shopify never burns through
+ * its 8-retry budget and never deletes the subscription.
  */
 const ALLOWED_TOPICS = new Set(['orders/paid', 'orders/fulfilled']);
+
+/**
+ * Topics that actually TRIGGER the SDS email — i.e. the moment the goods leave
+ * the warehouse and the customer starts storing / handling the chemicals.
+ *
+ * Default: dispatch only (orders/fulfilled). orders/paid still arrives and is
+ * acknowledged with a 200, but sends nothing, so the customer no longer gets
+ * their SDS email at checkout.
+ *
+ * Override without touching code if you ever want payment to trigger it again:
+ *   SDS_TRIGGER_TOPICS=orders/paid,orders/fulfilled
+ *   SDS_TRIGGER_TOPICS=orders/paid
+ *
+ * About courier / automatic tracking updates: those are fulfilment events too.
+ * As long as the order gets a real Shopify fulfilment (manual dispatch OR a
+ * fulfilment created by the courier's tracking app), orders/fulfilled fires
+ * once the order is COMPLETELY fulfilled. A tracking-number-only update on an
+ * already-fulfilled order does not fire it again, and a partial (multi-box)
+ * fulfilment does not fire it until the last parcel is fulfilled — that order
+ * is emailed once, on the final parcel.
+ */
+const TRIGGER_TOPICS = new Set(
+  (process.env.SDS_TRIGGER_TOPICS || 'orders/fulfilled')
+    .split(',')
+    .map((t) => t.trim().toLowerCase())
+    .filter((t) => ALLOWED_TOPICS.has(t))
+);
+
+if (TRIGGER_TOPICS.size === 0) {
+  fail('SDS_TRIGGER_TOPICS does not contain a supported topic (use orders/fulfilled and/or orders/paid)');
+}
 
 /**
  * Shared webhook processor (HMAC-verified).
@@ -69,7 +98,7 @@ async function handleOrderWebhook(req, res) {
 
   // 1. Confirm the delivery really came from Shopify
   if (!verifyWebhook(req.body, hmac, webhookSecret)) {
-    console.error(`[webhook] HMAC verification failed for shop=${shop}`);
+    console.error(`[webhook] HMAC verification failed for shop=${shop} topic=${topic}`);
     return res.status(401).json({ error: 'Invalid HMAC signature' });
   }
 
@@ -85,22 +114,34 @@ async function handleOrderWebhook(req, res) {
     return res.status(400).json({ error: 'Invalid JSON body' });
   }
 
+  // 3. Dispatch-only gate. orders/paid is acknowledged (200) but not acted on,
+  //    so no email goes out at checkout. Nothing is written to the sent-order
+  //    ledger, so the later orders/fulfilled delivery is still free to send.
+  if (!TRIGGER_TOPICS.has(topic)) {
+    if (webhookId) store.mark(webhookId);
+    console.log(
+      `[webhook] ${topic} for order ${order.id} on ${shop} — not a dispatch event, no email sent`
+    );
+    return res.status(200).json({ ok: true, emailsSent: 0, reason: 'not a dispatch event', topic });
+  }
+
   try {
-    // 2.5 Get a valid Admin API access token (OAuth token takes priority)
+    // 4. Get a valid Admin API access token (OAuth token takes priority)
     const accessToken = await getAdminAccessToken();
 
-    // 2.6 Cross-topic guard — only ONE SDS email per order, even if both
-    //     orders/fulfilled and orders/paid fire for the same order.
+    // 5. Order-level guard — only ONE SDS email per order, even when the same
+    //    order is fulfilled in several parcels or Shopify retries a delivery.
     if (order.id && store.orderSent(order.id)) {
       if (webhookId) store.mark(webhookId);
       return res.status(200).json({ ok: true, skipped: 'order already emailed' });
     }
-    // 2.7 Opt-out check (metafield-driven).
-    //     A flag on the B2B Company suppresses EVERY location and contact under
-    //     it (existing and future); a flag on the Customer suppresses that
-    //     buyer only. Placed BEFORE findSdsItems() so an excluded order costs
-    //     no extra product lookups. Returns HTTP 200 (never 4xx) so Shopify
-    //     does not retry the delivery.
+
+    // 6. Opt-out check (metafield-driven).
+    //    A flag on the B2B Company suppresses EVERY location and contact under
+    //    it (existing and future); a flag on the Customer suppresses that
+    //    buyer only. Placed BEFORE findSdsItems() so an excluded order costs
+    //    no extra product lookups. Returns HTTP 200 (never 4xx) so Shopify
+    //    does not retry the delivery.
     const exclusion = await checkExclusions(shop, accessToken, order);
     if (exclusion.excluded) {
       console.log(
@@ -120,16 +161,14 @@ async function handleOrderWebhook(req, res) {
       });
     }
 
-
-
-    // 3. Map line items -> product GIDs
+    // 7. Map line items -> product GIDs
     const lineItems = (order.line_items || []).map((li) => ({
       title: li.title,
       sku: li.sku,
       productId: li.product_id ? `gid://shopify/Product/${li.product_id}` : null,
     }));
 
-    // 4. Keep only unique products that are in an applicable category
+    // 8. Keep only unique products that are in an applicable category
     //    AND have a populated custom.download_pdf_file metafield
     const sdsItems = await findSdsItems(shop, accessToken, { lineItems });
 
@@ -140,7 +179,7 @@ async function handleOrderWebhook(req, res) {
       return res.status(200).json({ ok: true, emailsSent: 0 });
     }
 
-    // 5. Send the SDS email
+    // 9. Send the SDS email
     const to = order.email;
     if (!to) {
       console.warn(`[webhook] Order ${order.id} has no customer email address; skipping`);
@@ -154,7 +193,8 @@ async function handleOrderWebhook(req, res) {
     if (order.id) store.markOrderSent(order.id);
     if (webhookId) store.mark(webhookId);
     console.log(
-      `[webhook] SDS email sent for order ${order.id} -> ${to} (${sdsItems.length} item(s)) on ${shop}`
+      `[webhook] SDS email sent for order ${order.id} -> ${to} (${sdsItems.length} item(s)) ` +
+        `via ${topic} on ${shop}`
     );
     return res.status(200).json({ ok: true, emailsSent: sdsItems.length });
   } catch (err) {
@@ -227,9 +267,16 @@ app.get('/auth/callback', async (req, res) => {
   }
 });
 
-app.get('/health', (req, res) => res.json({ ok: true }));
+app.get('/health', (req, res) =>
+  res.json({
+    ok: true,
+    triggers: Array.from(TRIGGER_TOPICS),
+    accepts: Array.from(ALLOWED_TOPICS),
+  })
+);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`SDS emailer listening on port ${PORT}`);
+  console.log(`[config] Sending SDS email on: ${Array.from(TRIGGER_TOPICS).join(', ')}`);
 });
